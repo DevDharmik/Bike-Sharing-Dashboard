@@ -7,18 +7,37 @@ import plotly.express as px
 # ------------------ Page config ------------------
 st.set_page_config(page_title="Bike Sharing Dashboard", layout="wide")
 
-# ------------------ Load data ------------------
-df = pd.read_csv("train.csv")
-df["datetime"] = pd.to_datetime(df["datetime"])
+# ------------------ Load data safely ------------------
+try:
+    df = pd.read_csv("train.csv")
+except FileNotFoundError:
+    st.error("train.csv not found! Make sure it is in the root of the repo.")
+    st.stop()
 
-# Feature engineering
+# Strip any spaces in column names (prevents errors)
+df.columns = df.columns.str.strip()
+
+# Check datetime column exists
+if "datetime" not in df.columns:
+    st.error("Column 'datetime' not found in CSV.")
+    st.stop()
+
+# Convert datetime
+df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+
+# Drop rows where datetime conversion failed
+df = df.dropna(subset=["datetime"])
+
+# ------------------ Feature engineering ------------------
 df["year"] = df["datetime"].dt.year
 df["month"] = df["datetime"].dt.month
 df["hour"] = df["datetime"].dt.hour
 df["day"] = df["datetime"].dt.day_name()
 
+# Map seasons
 season_map = {1: "Spring", 2: "Summer", 3: "Fall", 4: "Winter"}
-df["season"] = df["season"].map(season_map)
+if "season" in df.columns:
+    df["season"] = df["season"].map(season_map)
 
 # ------------------ Title ------------------
 st.title("🚲 Washington D.C. Bike Sharing Dashboard")
@@ -35,21 +54,24 @@ year_filter = st.sidebar.multiselect(
 
 season_filter = st.sidebar.multiselect(
     "Select Season",
-    options=df["season"].unique(),
-    default=df["season"].unique()
+    options=df["season"].unique() if "season" in df.columns else [],
+    default=df["season"].unique() if "season" in df.columns else []
 )
 
 weather_filter = st.sidebar.multiselect(
     "Select Weather",
-    options=df["weather"].unique(),
-    default=df["weather"].unique()
+    options=df["weather"].unique() if "weather" in df.columns else [],
+    default=df["weather"].unique() if "weather" in df.columns else []
 )
 
-filtered_df = df[
-    (df["year"].isin(year_filter)) &
-    (df["season"].isin(season_filter)) &
-    (df["weather"].isin(weather_filter))
-]
+# Apply filters safely
+filtered_df = df.copy()
+if year_filter:
+    filtered_df = filtered_df[filtered_df["year"].isin(year_filter)]
+if "season" in filtered_df.columns and season_filter:
+    filtered_df = filtered_df[filtered_df["season"].isin(season_filter)]
+if "weather" in filtered_df.columns and weather_filter:
+    filtered_df = filtered_df[filtered_df["weather"].isin(weather_filter)]
 
 # ------------------ Layout ------------------
 col1, col2 = st.columns(2)
@@ -65,18 +87,21 @@ with col2:
     st.bar_chart(filtered_df.groupby("day")["count"].mean())
 
 # -------- Plot 3: Seasonal distribution --------
-st.subheader("Bike Rentals by Season")
-fig1, ax1 = plt.subplots()
-sns.boxplot(x="season", y="count", data=filtered_df, ax=ax1)
-st.pyplot(fig1)
+if "season" in filtered_df.columns:
+    st.subheader("Bike Rentals by Season")
+    fig1, ax1 = plt.subplots()
+    sns.boxplot(x="season", y="count", data=filtered_df, ax=ax1)
+    st.pyplot(fig1)
 
 # -------- Plot 4: Casual vs Registered --------
-st.subheader("Casual vs Registered Users")
-st.bar_chart(filtered_df[["casual", "registered"]].mean())
+if "casual" in filtered_df.columns and "registered" in filtered_df.columns:
+    st.subheader("Casual vs Registered Users")
+    st.bar_chart(filtered_df[["casual", "registered"]].mean())
 
 # -------- Plot 5: Weather impact --------
-st.subheader("Weather Impact on Rentals")
-st.bar_chart(filtered_df.groupby("weather")["count"].mean())
+if "weather" in filtered_df.columns:
+    st.subheader("Weather Impact on Rentals")
+    st.bar_chart(filtered_df.groupby("weather")["count"].mean())
 
 # -------- Plot 6: Heatmap --------
 st.subheader("Heatmap: Rentals by Day & Hour")
@@ -101,4 +126,3 @@ st.markdown("""
 - Summer shows the highest rental activity  
 - Adverse weather conditions significantly reduce demand  
 """)
-
